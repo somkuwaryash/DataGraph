@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Artwork App</title>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://nytimes.github.io/svg-crowbar/svg-crowbar.js"></script>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+
+    <div id="container">
+
+        <!-- SVG Plot at the center -->
+        <div id="plot">
+            <!-- SVG for 2D plots -->
+            <svg width="600" height="400" id="artwork"></svg>
+        </div>
+    
+        <!-- Controls section below the plot -->
+        <div class="controls">
+            <select id="visualizationStyle">
+                <option value="scatter">Scatter Plot</option>
+                <option value="heatmap">Heatmap</option>
+            </select>
+    
+            <h3>Input your data (format: x,y; x2,y2; ...):</h3>
+            <textarea id="userData" rows="4" cols="50"></textarea>
+            <button onclick="useInputData()">Use Input Data</button>
+    
+            <!-- Add a button to generate random data -->
+            <button onclick="generateData()">Generate Random Data</button>
+    
+            <h3>Upload your CSV data:</h3>
+            <input type="file" id="csvFile" accept=".csv">
+            <button onclick="processCSV()">Upload CSV</button>
+        </div>
+
+        <button onclick="saveSVGPlot()">Save Plot</button>
+    
+        <!-- Data preview and summary below the controls -->
+        <h3>Preview and Summaries:</h3>
+        <div id="data-preview">
+            <p><strong>Data Preview:</strong></p>
+            <textarea id="data-display" rows="5" cols="50" readonly></textarea>
+            <p><strong>Summary:</strong></p>
+            <p id="data-summary"></p>
+        </div>
+    </div>
+    
+
+    <script>
+        const socket = io();
+
+        socket.on('update-artwork', (data) => {
+            visualizeData(data);
+        });
+
+        const tooltip = d3.select("body").append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+        function useInputData() {
+            const userData = document.getElementById("userData").value;
+            if (userData.trim() === "") {
+                alert("Please provide valid data or generate random data.");
+                return;
+            }
+
+            const dataPoints = userData.split(';').map(point => {
+                const [x, y] = point.split(',').map(num => parseFloat(num.trim()));
+                return { x, y };
+            });
+
+            // Emit the processed data to the server
+            socket.emit('update-artwork', dataPoints);
+        }
+
+        function generateData() {
+            // Generating 10 random data points for the example
+            let randomData = [];
+            for (let i = 0; i < 10; i++) {
+                randomData.push({ x: Math.random() * 600, y: Math.random() * 400 });
+            }
+            socket.emit('update-artwork', randomData);
+        }
+
+        function processCSV() {
+            const csvFile = document.getElementById("csvFile").files[0];
+
+            if (!csvFile) {
+                alert("Please select a valid CSV file.");
+                return;
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                const csvContent = event.target.result;
+                const dataPoints = csvContent
+                    .trim()
+                    .split('\n')
+                    .slice(1)
+                    .map(row => {
+                        const [x, y] = row.split(',').map(num => parseFloat(num.trim()));
+                        return { x, y };
+                    });
+
+                socket.emit('update-artwork', dataPoints);
+            };
+
+            reader.onerror = function() {
+                alert("Error reading the CSV file.");
+            };
+
+            reader.readAsText(csvFile);
+        }
+
+        function drawScatterPlot(data) {
+    const svg = d3.select("#artwork");
+    svg.selectAll("*").remove();
+
+    const width = +svg.attr("width");
+    const height = +svg.attr("height");
+
+    const xScale = d3.scaleLinear().domain([0, d3.max(data, d => d.x)]).range([0, width]);
+    const yScale = d3.scaleLinear().domain([0, d3.max(data, d => d.y)]).range([height, 0]);
+
+    svg.selectAll("circle")
+        .data(data)
+        .enter().append("circle")
+        .attr("cx", d => xScale(d.x))
+        .attr("cy", d => yScale(d.y))
+        .attr("r", 5)
+        .on("click", function(event, d) {
+            // Call a function to show insights
+            displayInsight(d);
+        });
+}
+
+function displayInsight(dataPoint) {
+    const insightElem = document.getElementById("data-summary"); // Changed from "clicked-data" to "data-summary"
+    insightElem.textContent = `You clicked on a point with x-value: ${dataPoint.x} and y-value: ${dataPoint.y}`;
+}
+
+
+
+        function addZoom() {
+    const svg = d3.select("#artwork");
+
+    const zoom = d3.zoom()
+        .scaleExtent([1, 10]) // Limit zoom scale between 1x and 10x
+        .on("zoom", function (event) {
+            const transform = event.transform;
+
+            svg.selectAll("circle")
+                .attr("cx", d => transform.applyX(xScale(d.x)))
+                .attr("cy", d => transform.applyY(yScale(d.y)))
+                .attr("r", 5 / transform.k); // Adjust the circle radius based on zoom level
+
+            // Optional: If you have axis, you'd also need to update them here
+        });
+
+    svg.call(zoom);
+}
+
+
+        function drawHeatmap(data) {
+            const svg = d3.select("#artwork");
+            svg.selectAll("*").remove();
+
+            const width = +svg.attr("width");
+            const height = +svg.attr("height");
+
+            const gridSize = Math.floor(width / 24);
+            const colors = ["#D8E6E7", "#218380"];
+
+            const colorScale = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d.y)])
+                .range(colors);
+
+                svg.selectAll("rect")
+    .data(data)
+    .enter().append("rect")
+    .attr("x", d => d.x * gridSize)
+    .attr("y", d => d.y * gridSize)
+    .attr("width", gridSize)
+    .attr("height", gridSize)
+    .attr("fill", d => colorScale(d.y))
+    .on("click", function(event, d) {
+        // Call a function to show insights
+        displayInsight(d);
+    });
+
+        }
+
+        function displayDataPreview(dataPoints) {
+    const previewTextArea = document.getElementById("data-display");
+    let dataText = '';
+    for (let point of dataPoints) {
+        dataText += `x: ${point.x}, y: ${point.y}\n`;
+    }
+    previewTextArea.value = dataText.slice(0, -1); // Remove last newline character
+}
+
+function displayDataSummary(dataPoints) {
+    const summaryElement = document.getElementById("data-summary");
+    
+    let xValues = dataPoints.map(point => point.x);
+    let yValues = dataPoints.map(point => point.y);
+    
+    let xMean = (xValues.reduce((acc, val) => acc + val, 0) / xValues.length).toFixed(2);
+    let yMean = (yValues.reduce((acc, val) => acc + val, 0) / yValues.length).toFixed(2);
+
+    summaryElement.textContent = `Mean of X-values: ${xMean}, Mean of Y-values: ${yMean}`;
+}
+
+// Update the visualizeData function to include the new functionalities:
+function visualizeData(dataPoints) {
+    displayDataPreview(dataPoints);
+    displayDataSummary(dataPoints);
+    const style = document.getElementById("visualizationStyle").value;
+    if (style === "scatter") {
+        drawScatterPlot(dataPoints);
+    } else if (style === "heatmap") {
+        drawHeatmap(dataPoints);
+    } // removed 3D plot as per your previous requirement
+}
+
+function saveSVGPlot() {
+    const e = document.createElement("script");
+    e.src = "https://nytimes.github.io/svg-crowbar/svg-crowbar.js";
+    e.className = "svg-crowbar";
+    document.body.appendChild(e);
+}
+
+    </script>
+
+</body>
+
+</html>
